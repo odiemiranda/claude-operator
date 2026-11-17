@@ -1,6 +1,6 @@
 {
-  "name": "relay",
-  "description": "Slash commands for the relay MCP tools. Needs the relay MCP server registered as \"relay\" (see the repo README).",
+  "name": "operator",
+  "description": "Slash commands for the operator MCP tools. Needs the operator MCP server registered as \"operator\" (see the repo README).",
   "version": "0.1.0",
   "author": {
     "name": "odiemiranda"

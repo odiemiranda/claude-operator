@@ -12,7 +12,7 @@ Claude Code (Mac) ⇄ mcp-remote (Mac, stdio) ⇄ hub (Mac: HTTP + WS + SQLite +
 - The worker runs inside your desktop session, so apps it launches open on the desktop you see over remote desktop.
 - The dashboard lists tasks, streams output, and lets you allow/deny commands and continue after a manual step (works from a phone over Tailscale).
 
-Inside the code and tools the system is called **relay**: the MCP server, its `relay_*` tools, `RELAY_TOKEN` and the `/relay:*` slash commands.
+Claude Code sees it as the `operator` MCP server, with `operator_*` tools and optional `/operator:*` slash commands. The hub and worker internals still say relay (`RELAY_TOKEN`, `RELAY_TARGET`).
 
 ## Requirements
 
@@ -34,7 +34,7 @@ Run it in the background instead with `bun run hub:start`; `hub:stop`, `hub:stat
 Register the MCP server with Claude Code (user scope, so every project sees it):
 
 ```sh
-claude mcp add relay -s user \
+claude mcp add operator -s user \
   -e HUB_URL=http://100.x.y.z:7717 -e RELAY_TOKEN=<token> -e RELAY_TARGET=win \
   -- bun run /Users/<you>/claude-operator/mcp-remote/index.ts
 ```
@@ -44,11 +44,11 @@ Use the full path to `index.ts`. If `~` reaches Claude Code unexpanded, the serv
 Or run the MCP server in the background: `bun run mcp:start` serves it over HTTP on `127.0.0.1:7718` (`MCP_PORT`, `MCP_HOST` in `.env`); `mcp:stop`, `mcp:status`, `mcp:logs` as for the hub. Register that one instead:
 
 ```sh
-claude mcp add relay -s user --transport http http://127.0.0.1:7718/mcp \
+claude mcp add operator -s user --transport http http://127.0.0.1:7718/mcp \
   --header "Authorization: Bearer <RELAY_TOKEN>"
 ```
 
-It must be running whenever Claude Code needs the relay tools.
+It must be running whenever Claude Code needs the operator tools.
 
 ## Windows: worker
 
@@ -97,11 +97,11 @@ Agent tasks run in a folder chosen by name. The allowlist maps each name to a fo
 "my-app": { "path": "C:\\src\\my-app", "description": "The app's checkout" }
 ```
 
-- `relay_agent` with `project: "my-app"` runs in that folder. Without `project` it runs in `WORKER_CWD`, which must be a folder outside this checkout.
+- `operator_agent` with `project: "my-app"` runs in that folder. Without `project` it runs in `WORKER_CWD`, which must be a folder outside this checkout.
 - An unknown name, or a path that is missing or not a directory, fails the task with the reason.
 - A resumed task (`resume_task_id`) always runs in the original task's project.
 - **One agent task per project at a time.** A second one waits in the queue. Tasks without a project share `WORKER_CWD`, so they also run one at a time. Exec tasks are not limited this way. `WORKER_MAX_CONCURRENT` caps the total.
-- The worker sends the driver the names and descriptions of its projects and scripts (never paths or commands). `relay_projects` and `relay_scripts` list them.
+- The worker sends the driver the names and descriptions of its projects and scripts (never paths or commands). `operator_projects` and `operator_scripts` list them.
 
 Only list folders you trust: each folder's own `.claude/settings.json` (allow rules, hooks) applies to agents that run there. Don't list the `WORKER_CWD` folder under a second name; the one-agent-per-project lock goes by name.
 
@@ -121,40 +121,40 @@ Only list folders you trust: each folder's own `.claude/settings.json` (allow ru
 
 **This is not a sandbox.** A shell command you approve, or any command at `auto`, can reach every file your Windows user can. For real isolation, run the worker as a separate Windows user.
 
-Requests show up in the dashboard and in `relay_status`. Unanswered requests are denied after `WORKER_PERMISSION_TIMEOUT_MIN`.
+Requests show up in the dashboard and in `operator_status`. Unanswered requests are denied after `WORKER_PERMISSION_TIMEOUT_MIN`.
 
-The agent has a `wait_for_user` tool. When it needs you to do something on the desktop (log in, click through a dialog), it pauses until you press Continue in the dashboard or the driver calls `relay_control continue`. To change what a running agent is doing, use `relay_control` `interrupt` with a `message`.
+The agent has a `wait_for_user` tool. When it needs you to do something on the desktop (log in, click through a dialog), it pauses until you press Continue in the dashboard or the driver calls `operator_control continue`. To change what a running agent is doing, use `operator_control` `interrupt` with a `message`.
 
 ## MCP tools
 
 | tool | use |
 |---|---|
-| `relay_exec` | run an allowlisted script, wait up to `wait_s`, return recent output |
-| `relay_agent` | start an agent task; `project`, `model`, `permission`, `resume_task_id` to continue a session |
-| `relay_status` | status, pending decisions, output; `grep`, `tail`, `after_seq`, `wait_s` |
-| `relay_control` | `approve`, `deny`, `continue` a pending request; `message` queues an instruction for after the current turn; `interrupt` stops the current turn and runs `message` next (alone, it ends the task as cancelled, still resumable); `cancel` kills the task |
-| `relay_projects`, `relay_scripts` | names and descriptions the worker offers |
-| `relay_tasks`, `relay_workers` | overview |
+| `operator_exec` | run an allowlisted script, wait up to `wait_s`, return recent output |
+| `operator_agent` | start an agent task; `project`, `model`, `permission`, `resume_task_id` to continue a session |
+| `operator_status` | status, pending decisions, output; `grep`, `tail`, `after_seq`, `wait_s` |
+| `operator_control` | `approve`, `deny`, `continue` a pending request; `message` queues an instruction for after the current turn; `interrupt` stops the current turn and runs `message` next (alone, it ends the task as cancelled, still resumable); `cancel` kills the task |
+| `operator_projects`, `operator_scripts` | names and descriptions the worker offers |
+| `operator_tasks`, `operator_workers` | overview |
 
 ## Slash commands (optional)
 
-The repo is also a Claude Code plugin marketplace with `/relay:projects`, `/relay:scripts`, `/relay:workers`, `/relay:tasks`, `/relay:status <task>`, `/relay:agent <project> <prompt>` and `/relay:exec <script> [args]`. Each calls the matching MCP tool, so register the `relay` MCP server first.
+The repo is also a Claude Code plugin marketplace with `/operator:projects`, `/operator:scripts`, `/operator:workers`, `/operator:tasks`, `/operator:status <task>`, `/operator:agent <project> <prompt>` and `/operator:exec <script> [args]`. Each calls the matching MCP tool, so register the `operator` MCP server first.
 
 ```sh
 claude plugin marketplace add ~/claude-operator
-claude plugin install relay@claude-operator
+claude plugin install operator@claude-operator
 ```
 
 ## Example CLAUDE.md for your Mac project
 
 ```md
-## Windows (relay)
-- The Windows machine is reachable through the relay MCP tools (worker "win").
-- relay_projects lists the folders an agent can work in; relay_scripts lists the scripts.
-- Builds, launching the app and git sync: relay_exec with build, launch, kill-app, cdp-status, git-sync.
+## Windows (operator)
+- The Windows machine is reachable through the operator MCP tools (worker "win").
+- operator_projects lists the folders an agent can work in; operator_scripts lists the scripts.
+- Builds, launching the app and git sync: operator_exec with build, launch, kill-app, cdp-status, git-sync.
   Push commits first; the worker checks them out with git-sync <ref>.
-- After a failed build: relay_status with grep "error" to get the first errors, fix them here, push, rebuild.
-- Use relay_agent only for work that needs judgment on Windows (Windows-only errors, debugging the running app).
+- After a failed build: operator_status with grep "error" to get the first errors, fix them here, push, rebuild.
+- Use operator_agent only for work that needs judgment on Windows (Windows-only errors, debugging the running app).
   Write self-contained instructions; the remote agent can't see this conversation.
 - When the app needs a manual step (login, dialog), tell me and wait.
 ```
@@ -175,5 +175,5 @@ hub/                  index.ts (HTTP, WS, routing), db.ts (SQLite), dashboard.ht
 mcp-remote/index.ts   MCP server for Claude Code
 worker/               index.ts (connection, outbox, queue), exec.ts, agent.ts, config.ts
 worker/windows/       example .cmd scripts and the logon launcher
-plugin/               /relay:* slash commands
+plugin/               /operator:* slash commands
 ```

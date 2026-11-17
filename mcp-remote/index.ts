@@ -72,13 +72,13 @@ async function report(id: string, opts: { tail?: number; grep?: string; after_se
     `task ${t.id} [${t.kind} ${t.kind === "exec" ? t.script : t.model ?? "default model"}${t.project ? `, project ${t.project}` : ""}] on ${t.target}: ${t.status}`,
   ];
   if (t.result) out.push(`result: ${t.result}`);
-  if (t.session_id) out.push(`session: ${t.session_id} (continue with relay_agent resume_task_id="${t.id}")`);
+  if (t.session_id) out.push(`session: ${t.session_id} (continue with operator_agent resume_task_id="${t.id}")`);
   if (v.pending.length) {
     out.push("needs a decision:");
     for (const p of v.pending)
       out.push(p.kind === "permission"
-        ? `  - ${p.request_id}: allow ${p.tool}? ${p.input}  → relay_control approve|deny`
-        : `  - ${p.request_id}: waiting for the user: ${p.reason}  → relay_control continue`);
+        ? `  - ${p.request_id}: allow ${p.tool}? ${p.input}  → operator_control approve|deny`
+        : `  - ${p.request_id}: waiting for the user: ${p.reason}  → operator_control continue`);
   }
   out.push(`last_seq: ${v.last_seq}`);
   out.push(`--- ${shown.length} of ${lines.length} lines${opts.grep ? ` matching /${opts.grep}/` : ""} ---`);
@@ -96,9 +96,9 @@ async function workerNamed(name: string): Promise<WorkerInfo | undefined> {
 
 /** One server with every relay tool. HTTP mode builds one per request (stateless). */
 function makeServer(): McpServer {
-  const server = new McpServer({ name: "relay", version: "1.0.0" });
+  const server = new McpServer({ name: "operator", version: "1.0.0" });
 
-  server.registerTool("relay_workers", {
+  server.registerTool("operator_workers", {
     description: "List connected remote workers and the tasks each one holds.",
     inputSchema: {},
   }, async () => {
@@ -109,9 +109,9 @@ function makeServer(): McpServer {
     } catch (e) { return fail(e); }
   });
 
-  server.registerTool("relay_projects", {
+  server.registerTool("operator_projects", {
     description:
-      "List the project folders a worker offers for relay_agent's project parameter (names and descriptions only, no paths). " +
+      "List the project folders a worker offers for operator_agent's project parameter (names and descriptions only, no paths). " +
       "The list is refreshed when the worker connects and when a task starts, not continuously.",
     inputSchema: { target: z.string().optional().describe(`Worker name (default ${TARGET})`) },
   }, async ({ target }) => {
@@ -124,9 +124,9 @@ function makeServer(): McpServer {
     } catch (e) { return fail(e); }
   });
 
-  server.registerTool("relay_scripts", {
+  server.registerTool("operator_scripts", {
     description:
-      "List the scripts a worker offers for relay_exec (names and descriptions only). " +
+      "List the scripts a worker offers for operator_exec (names and descriptions only). " +
       "The list is refreshed when the worker connects and when a task starts, not continuously.",
     inputSchema: { target: z.string().optional().describe(`Worker name (default ${TARGET})`) },
   }, async ({ target }) => {
@@ -142,10 +142,10 @@ function makeServer(): McpServer {
     } catch (e) { return fail(e); }
   });
 
-  server.registerTool("relay_exec", {
+  server.registerTool("operator_exec", {
     description:
       "Run an allowlisted script on a remote worker (no LLM, no tokens). Use for build, launch, git-sync, cdp-status and similar. " +
-      "Returns the task with recent output. Prefer this over relay_agent whenever no judgment is needed.",
+      "Returns the task with recent output. Prefer this over operator_agent whenever no judgment is needed.",
     inputSchema: {
       script: z.string().describe("Script name from the worker's scripts.json, e.g. build"),
       args: z.array(z.string()).optional().describe("Extra args, only if the script allows them"),
@@ -160,7 +160,7 @@ function makeServer(): McpServer {
     } catch (e) { return fail(e); }
   });
 
-  server.registerTool("relay_agent", {
+  server.registerTool("operator_agent", {
     description:
       "Give a task to the Claude agent on a remote worker. Write precise, self-contained instructions (paths, commits, what to report). " +
       "The remote agent cannot see this conversation. Use resume_task_id to continue a previous agent task's session.",
@@ -170,7 +170,7 @@ function makeServer(): McpServer {
       permission: z.enum(["ask", "edits", "auto"]).optional()
         .describe("ask: read-only tools run freely; edits: file edits too; auto: everything incl. shell. Worker default applies if omitted."),
       resume_task_id: z.string().optional().describe("Continue the session from this earlier agent task; it runs in the same project"),
-      project: z.string().optional().describe("Project name from relay_projects. Omit only if the worker has a default folder (WORKER_CWD) outside the relay checkout; otherwise the task fails"),
+      project: z.string().optional().describe("Project name from operator_projects. Omit only if the worker has a default folder (WORKER_CWD) outside the relay checkout; otherwise the task fails"),
       target: z.string().optional(),
       wait_s: z.number().min(0).max(55).optional().describe("Wait up to this many seconds (default 20)"),
     },
@@ -184,7 +184,7 @@ function makeServer(): McpServer {
     } catch (e) { return fail(e); }
   });
 
-  server.registerTool("relay_status", {
+  server.registerTool("operator_status", {
     description:
       "Check a task: status, result, pending decisions, and recent output. Use wait_s to block until it finishes or needs you. " +
       "Use grep to pull errors out of long build logs, after_seq to get only new lines.",
@@ -199,7 +199,7 @@ function makeServer(): McpServer {
     try { return await report(task_id, opts); } catch (e) { return fail(e); }
   });
 
-  server.registerTool("relay_control", {
+  server.registerTool("operator_control", {
     description:
       "Answer a pending request, steer a running agent, or stop a task. approve/deny a permission request; continue a " +
       "wait_for_user pause (message is passed to the agent); message: queue a new instruction the agent runs when its " +
@@ -221,7 +221,7 @@ function makeServer(): McpServer {
     } catch (e) { return fail(e); }
   });
 
-  server.registerTool("relay_tasks", {
+  server.registerTool("operator_tasks", {
     description: "List recent tasks across workers.",
     inputSchema: { limit: z.number().optional() },
   }, async ({ limit }) => {
@@ -236,7 +236,7 @@ function makeServer(): McpServer {
   return server;
 }
 
-if (!TOKEN) console.error("relay MCP: RELAY_TOKEN is not set; hub calls will fail.");
+if (!TOKEN) console.error("operator MCP: RELAY_TOKEN is not set; hub calls will fail.");
 
 if (process.argv.includes("--http")) {
   const MCP_PORT = Number(process.env.MCP_PORT || 7718);
@@ -254,8 +254,8 @@ if (process.argv.includes("--http")) {
       return transport.handleRequest(req);
     },
   });
-  console.error(`relay MCP on http://${host}:${MCP_PORT}/mcp, hub ${HUB} (default target ${TARGET})`);
+  console.error(`operator MCP on http://${host}:${MCP_PORT}/mcp, hub ${HUB} (default target ${TARGET})`);
 } else {
   await makeServer().connect(new StdioServerTransport());
-  console.error(`relay MCP connected to ${HUB} (default target ${TARGET})`);
+  console.error(`operator MCP connected to ${HUB} (default target ${TARGET})`);
 }

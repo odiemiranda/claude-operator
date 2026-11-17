@@ -126,7 +126,7 @@ function pathsOf(toolName: string, input: unknown, cwd: string): string[] {
  * - Not a sandbox: an approved or auto-level shell command can still reach any file this Windows user can.
  */
 function decide(level: PermissionLevel, toolName: string, input: unknown, cwd: string): "allow" | "ask" | "deny" {
-  if (toolName === "mcp__relay__wait_for_user") return "allow";
+  if (toolName === "mcp__operator__wait_for_user") return "allow";
   if (toolName === "EnterWorktree") return "deny"; // would move the session out of the folder paths are judged against
   const fileTool = READ_ONLY.has(toolName) || EDITS.has(toolName);
   // Paths are checked on every tool that carries one, so a tool outside the two sets cannot reach the relay either.
@@ -192,8 +192,8 @@ export async function runAgent(ctx: TaskContext): Promise<void> {
   ctx.signal.addEventListener("abort", () => abort.abort());
 
   // Blocks the agent until the human (via dashboard or driver) sends "continue".
-  const relayTools = createSdkMcpServer({
-    name: "relay",
+  const operatorTools = createSdkMcpServer({
+    name: "operator",
     version: "1.0.0",
     tools: [
       tool(
@@ -235,7 +235,7 @@ export async function runAgent(ctx: TaskContext): Promise<void> {
   };
 
   // Streaming input keeps the session (and the in-process MCP server) alive until the last result.
-  // Driver messages (relay_control message/interrupt) are queued in inbox and sent one per turn, only after the
+  // Driver messages (operator_control message/interrupt) are queued in inbox and sent one per turn, only after the
   // current turn's result, so every turn ends in exactly one result.
   const userMsg = (text: string) =>
     ({ type: "user", message: { role: "user", content: text }, parent_tool_use_id: null }) as SDKUserMessage;
@@ -285,7 +285,7 @@ export async function runAgent(ctx: TaskContext): Promise<void> {
         abortController: abort,
         permissionMode: "default",
         canUseTool,
-        mcpServers: { relay: relayTools },
+        mcpServers: { operator: operatorTools },
         settingSources: config.settingSources,
         systemPrompt: { type: "preset", preset: "claude_code", append: SYSTEM_APPEND },
         env,

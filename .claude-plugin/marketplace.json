@@ -1,12 +1,12 @@
 {
   "name": "claude-operator",
   "owner": { "name": "odiemiranda" },
-  "metadata": { "description": "Slash commands for the relay MCP tools", "version": "0.1.0" },
+  "metadata": { "description": "Slash commands for the operator MCP tools", "version": "0.1.0" },
   "plugins": [
     {
-      "name": "relay",
+      "name": "operator",
       "source": "./plugin",
-      "description": "/relay:* commands that call the relay MCP server's tools (projects, scripts, agent, exec, status, tasks, workers)"
+      "description": "/operator:* commands that call the operator MCP server's tools (projects, scripts, agent, exec, status, tasks, workers)"
     }
   ]
 }
