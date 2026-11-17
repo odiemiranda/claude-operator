@@ -4,6 +4,7 @@ import type { TaskContext } from "./context";
 
 const IS_WIN = process.platform === "win32";
 
+// ponytail: non-Windows kills only the direct child; spawn detached + process.kill(-pid) to stop the whole group.
 function killTree(pid: number) {
   if (IS_WIN) Bun.spawnSync(["taskkill", "/PID", String(pid), "/T", "/F"]);
   else try { process.kill(pid, "SIGTERM"); } catch {}
