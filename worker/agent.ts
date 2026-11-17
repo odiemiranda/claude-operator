@@ -123,7 +123,7 @@ function pathsOf(toolName: string, input: unknown, cwd: string): string[] {
  * - Read-only and edit tools run freely only inside the task's folder; a path outside it asks first.
  * - Edits to files that run or configure tools later (.claude/, .git/, .vscode/, .mcp.json, ...) ask below auto.
  * - Path spellings the gate cannot judge (UNC, device paths, streams, short names) ask at every level.
- * - Not a sandbox: an approved or auto-level shell command can still reach any file this Windows user can.
+ * - Not a sandbox: an approved or auto-level shell command can still reach any file the worker's OS user can.
  */
 function decide(level: PermissionLevel, toolName: string, input: unknown, cwd: string): "allow" | "ask" | "deny" {
   if (toolName === "mcp__operator__wait_for_user") return "allow";

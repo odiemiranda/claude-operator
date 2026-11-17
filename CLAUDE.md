@@ -4,10 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-relay lets Claude Code on a Mac drive a Windows machine: allowlisted scripts (`exec` tasks) and Claude Agent SDK sessions (`agent` tasks). Bun + TypeScript, SQLite via `bun:sqlite`, no build step.
+relay (published as claude-operator) lets Claude Code drive another machine (Windows, macOS or Linux): allowlisted scripts (`exec` tasks) and Claude Agent SDK sessions (`agent` tasks). Bun + TypeScript, SQLite via `bun:sqlite`, no build step.
 
 ```
-Claude Code (Mac) ⇄ mcp-remote (stdio MCP) ⇄ hub (HTTP + WS + SQLite + dashboard) ⇄ worker (Windows) ⇄ Agent SDK / scripts
+Claude Code ⇄ mcp-remote (stdio or HTTP MCP) ⇄ hub (HTTP + WS + SQLite + dashboard) ⇄ worker (any OS) ⇄ Agent SDK / scripts
 ```
 
 ## Commands
@@ -53,5 +53,5 @@ Bun loads `.env` automatically. `.env.example` lists every setting. Running the 
 
 ## Constraints
 
-- The hub can make the Windows machine run commands. Bind `HUB_HOST` to a Tailscale or loopback address, never `0.0.0.0`. Keep `scripts.json` to commands that are safe to run unattended.
+- The hub can make the worker machine run commands. Bind `HUB_HOST` to a Tailscale or loopback address, never `0.0.0.0`. Keep `scripts.json` to commands that are safe to run unattended.
 - The worker must run inside the logged-in desktop session (`schtasks /it`, see README) so the apps it launches are visible.

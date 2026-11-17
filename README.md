@@ -1,47 +1,75 @@
 # claude-operator
 
-Let Claude Code on your Mac operate a Windows machine: run allowlisted scripts there, or hand a task to a Claude agent that works in a folder on Windows. Everything goes through a small Bun + SQLite hub with a web dashboard.
+Let Claude Code operate another machine: run allowlisted scripts there, or hand a task to a Claude agent that works in a folder on that machine. Windows, macOS and Linux all work, on either side. Everything goes through a small Bun + SQLite hub with a web dashboard.
 
 ```
-Claude Code (Mac) ⇄ mcp-remote (Mac, stdio) ⇄ hub (Mac: HTTP + WS + SQLite + dashboard) ⇄ worker (Windows) ⇄ Claude Agent SDK / scripts
+Claude Code ⇄ MCP server ⇄ hub (HTTP + WS + SQLite + dashboard) ⇄ worker ⇄ Claude Agent SDK / scripts
 ```
 
 - **exec tasks** run a named script from `worker/scripts.json` (build, launch, git-sync…). No tokens spent.
-- **agent tasks** run a Claude Agent SDK session in a named project folder on Windows (default model `claude-haiku-5-5`).
-- Every event is stored in SQLite. The worker keeps unacknowledged messages and resends them, so a hub restart or Mac sleep loses no output.
-- The worker runs inside your desktop session, so apps it launches open on the desktop you see over remote desktop.
+- **agent tasks** run a Claude Agent SDK session in a named project folder on the worker (default model `claude-haiku-5-5`).
+- Every event is stored in SQLite. The worker keeps unacknowledged messages and resends them, so a hub restart or a sleeping laptop loses no output.
+- The worker can run inside your desktop session, so apps it launches open on the desktop you see over remote desktop.
 - The dashboard lists tasks, streams output, and lets you allow/deny commands and continue after a manual step (works from a phone over Tailscale).
 
 Claude Code sees it as the `operator` MCP server, with `operator_*` tools and optional `/operator:*` slash commands. The hub and worker internals still say relay (`RELAY_TOKEN`, `RELAY_TARGET`).
 
+## The three parts
+
+| part | runs on | what it does |
+|---|---|---|
+| **MCP server** (`mcp-remote/`) | the machine with Claude Code | gives Claude Code the `operator_*` tools; talks to the hub over HTTP |
+| **hub** (`hub/`) | any machine both sides can reach, usually the Claude Code one | stores tasks and events in SQLite, routes them to workers, serves the dashboard |
+| **worker** (`worker/`) | the machine being operated | connects out to the hub, runs scripts and agent sessions, streams output back |
+
+Each part runs on Windows, macOS or Linux. A typical setup: hub and MCP server on your laptop, one worker on a build box. Several workers can share one hub; each has a `WORKER_NAME`, and tools take a `target` (default `RELAY_TARGET`).
+
 ## Requirements
 
-- Mac: [Bun](https://bun.sh), Claude Code.
-- Windows: Bun, Git for Windows (Claude Code uses Git Bash for its shell tool), Claude Code installed and signed in with `claude login`.
-- A private network between the two, e.g. [Tailscale](https://tailscale.com), or the same LAN.
+- Every machine: [Bun](https://bun.sh) and a clone of this repo.
+- Worker machine: Claude Code installed and signed in with `claude login` (agent tasks use that login). On Windows also Git for Windows, since Claude Code uses Git Bash for its shell tool.
+- A private network between the machines, e.g. [Tailscale](https://tailscale.com), or the same LAN.
 
-## Mac: hub and MCP server
+## Install
+
+On every machine:
 
 ```sh
-git clone <this repo> ~/claude-operator && cd ~/claude-operator
+git clone <this repo> ~/claude-operator     # Windows: C:\claude-operator
+cd ~/claude-operator
 bun install
-cp .env.example .env        # set RELAY_TOKEN (openssl rand -hex 32), HUB_HOST (Tailscale IP), HUB_URL
-bun run hub                 # open http://<HUB_HOST>:7717 for the dashboard
+cp .env.example .env
 ```
 
-Run it in the background instead with `bun run hub:start`; `hub:stop`, `hub:status` and `hub:logs` do the rest (output goes to `hub.log`). It does not restart after a reboot; for that, wrap `bun run hub` in a launchd agent.
+Every part reads `.env` from the repo root. All of them need the same `RELAY_TOKEN` (make one with `openssl rand -hex 32`).
 
-Register the MCP server with Claude Code (user scope, so every project sees it):
+Each part has the same four background commands, `<part>:start`, `<part>:stop`, `<part>:status` and `<part>:logs` (output in `<part>.log`), for example `bun run hub:start`. They don't survive a reboot; see [Start at login](#start-at-login) for that.
+
+## 1. Hub
+
+In `.env`: `RELAY_TOKEN`, `HUB_HOST` (the address to bind, e.g. your Tailscale IP), optionally `HUB_PORT` (7717) and `HUB_DB` (`relay.sqlite`).
+
+```sh
+bun run hub          # foreground; or bun run hub:start
+```
+
+Open `http://<HUB_HOST>:7717` for the dashboard and sign in with the token.
+
+## 2. MCP server
+
+Runs on the machine with Claude Code. It needs `HUB_URL` (`http://<HUB_HOST>:7717`, the exact address the hub binds), `RELAY_TOKEN`, and `RELAY_TARGET` (the default worker name).
+
+**Per session (stdio, default):** Claude Code starts and stops it. Register it once, at user scope so every project sees it:
 
 ```sh
 claude mcp add operator -s user \
   -e HUB_URL=http://100.x.y.z:7717 -e RELAY_TOKEN=<token> -e RELAY_TARGET=win \
-  -- bun run /Users/<you>/claude-operator/mcp-remote/index.ts
+  -- bun run /full/path/to/claude-operator/mcp-remote/index.ts
 ```
 
-Use the full path to `index.ts`. If `~` reaches Claude Code unexpanded, the server fails to start ("Connection closed"). `HUB_URL` must be the address the hub binds (`HUB_HOST`).
+Use the full path to `index.ts` (on Windows `C:\\claude-operator\\mcp-remote\\index.ts`). If `~` reaches Claude Code unexpanded, the server fails to start ("Connection closed").
 
-Or run the MCP server in the background: `bun run mcp:start` serves it over HTTP on `127.0.0.1:7718` (`MCP_PORT`, `MCP_HOST` in `.env`); `mcp:stop`, `mcp:status`, `mcp:logs` as for the hub. Register that one instead:
+**In the background (HTTP):** `bun run mcp:start` serves it on `127.0.0.1:7718` (`MCP_HOST`, `MCP_PORT`), reading the settings from `.env`. Register that instead:
 
 ```sh
 claude mcp add operator -s user --transport http http://127.0.0.1:7718/mcp \
@@ -50,51 +78,113 @@ claude mcp add operator -s user --transport http http://127.0.0.1:7718/mcp \
 
 It must be running whenever Claude Code needs the operator tools.
 
-## Windows: worker
+Check with `claude mcp get operator`; it should say Connected.
 
-```nu
-git clone <this repo> C:\claude-operator
-cd C:\claude-operator
-bun install
-cp .env.example .env                                     # same RELAY_TOKEN and HUB_URL; set WORKER_* values
-cp worker\scripts.example.json worker\scripts.json       # then edit paths and commands
-cp worker\projects.example.json worker\projects.json     # folders agents may work in
-bun run worker                                           # try it in the foreground first
+## 3. Worker
+
+Runs on the machine being operated. In `.env`: `RELAY_TOKEN`, `HUB_URL`, `WORKER_NAME` (what `RELAY_TARGET` refers to), and the `WORKER_*` settings described in `.env.example`.
+
+```sh
+cp worker/scripts.example.json worker/scripts.json     # edit commands and paths, see scripts.json below
+cp worker/projects.example.json worker/projects.json   # folders agents may work in
+bun run worker                                         # foreground first; later bun run worker:start
 ```
 
-The dashboard should now show the worker as connected.
+The dashboard should now show the worker as connected. `worker:stop` also ends running agent sessions and scripts.
 
-To run it in the background, use `bun run worker:start`; `worker:stop` (which also ends running agent sessions and scripts), `worker:status` and `worker:logs` do the rest, with output in `worker.log`. It does not come back after a reboot or logoff.
-
-Or start it at logon, inside your desktop session (no password stored, runs only while you're logged in):
-
-```nu
-^schtasks /create /tn RelayWorker /tr 'C:\claude-operator\worker\windows\start-worker.cmd' /sc onlogon /it /f
-^schtasks /run /tn RelayWorker
-```
+Run the worker inside your logged-in desktop session if the apps it launches should be visible on screen. The login options below do that.
 
 The first agent task logs a line like `· session … (auth oauth, claude-haiku-5-5)`. If it says `ANTHROPIC_API_KEY`, a key is reaching the session and billing the API instead of your plan. Set `WORKER_USE_API_KEY=1` if that is what you want.
 
+## Start at login
+
+The same recipe works for any part: swap `worker` for `hub` or `mcp` (the background HTTP MCP server).
+
+**Windows** (scheduled task in your desktop session, no password stored, runs only while you're logged in):
+
+```nu
+^schtasks /create /tn OperatorWorker /tr 'C:\claude-operator\worker\windows\start-worker.cmd' /sc onlogon /it /f
+^schtasks /run /tn OperatorWorker
+```
+
+`start-worker.cmd` runs the worker; copy it and change the last line for the hub.
+
+**macOS** (launchd agent). Save as `~/Library/LaunchAgents/com.claude-operator.worker.plist`, with the paths from `which bun` and your clone:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.claude-operator.worker</string>
+  <key>ProgramArguments</key>
+  <array><string>/Users/you/.bun/bin/bun</string><string>run</string><string>worker/index.ts</string></array>
+  <key>WorkingDirectory</key><string>/Users/you/claude-operator</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/Users/you/claude-operator/worker.log</string>
+  <key>StandardErrorPath</key><string>/Users/you/claude-operator/worker.log</string>
+</dict>
+</plist>
+```
+
+```sh
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.claude-operator.worker.plist
+```
+
+**Linux** (systemd user service). Save as `~/.config/systemd/user/claude-operator-worker.service`:
+
+```ini
+[Unit]
+Description=claude-operator worker
+
+[Service]
+WorkingDirectory=%h/claude-operator
+ExecStart=%h/.bun/bin/bun run worker/index.ts
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+
+```sh
+systemctl --user enable --now claude-operator-worker
+journalctl --user -u claude-operator-worker -f     # logs
+```
+
+For apps that need the desktop, use `WantedBy=graphical-session.target` and make sure the user manager has `DISPLAY`/`WAYLAND_DISPLAY` (most desktops import them; otherwise `systemctl --user import-environment DISPLAY WAYLAND_DISPLAY`). To keep a headless worker running after logout, `loginctl enable-linger $USER`.
+
 ## scripts.json
 
-Only scripts listed here can be run by exec tasks. Edit it any time; it's re-read for each task.
+Only scripts listed here can be run by exec tasks. Edit it any time; it's re-read for each task. `cmd` is the program and its fixed arguments, run without a shell.
+
+Windows:
 
 ```json
 "build": { "cmd": ["cmd", "/c", "C:\\claude-operator\\worker\\windows\\build.cmd"], "allowArgs": true, "timeoutMin": 360 }
 ```
 
-`allowArgs` lets the driver append arguments; leave it off unless the script expects them. Every argument must fully match the script's `argPattern` (a regex), or the task is refused. Without `argPattern` the default allows plain names only: letters, digits and `_ . / + -`, not starting with `-`, `/` or `.`, and without `..`. That keeps spaces, shell characters (`& | < > ^ % "`), options (`-f`), response files (`@x`) and Windows or network paths away from `cmd /c`. Set a pattern per script when it needs something else, as `build` and `git-sync` do in the example.
+macOS / Linux:
 
-Scripts and agent sessions start with `RELAY_TOKEN` emptied in their environment; that stops accidental leaks, not a script that reads `.env` itself.
+```json
+"build": { "cmd": ["/bin/sh", "/home/you/scripts/build.sh"], "allowArgs": true, "timeoutMin": 360 },
+"kill-app": { "cmd": ["pkill", "-x", "my-app"], "timeoutMin": 1 }
+```
 
-Example `.cmd` files are in `worker/windows/`: `build.cmd`, `git-sync.cmd`, and `launch.cmd`, which starts the app detached with `--remote-debugging-port=9222` so `cdp-status` can tell what it is showing (Chromium, Electron and CEF apps; keep that flag to debug builds). To keep a machine's scripts in their own folder or repo, point `WORKER_SCRIPTS` at that `scripts.json`.
+- `allowArgs` lets the driver append arguments; leave it off unless the script expects them.
+- Every argument must fully match the script's `argPattern` (a regex), or the task is refused. Without one, the default allows plain names only: letters, digits and `_ . / + -`, not starting with `-`, `/` or `.`, and without `..`. That keeps spaces, shell characters, options (`-f`), response files (`@x`) and paths out. Set a pattern per script when it needs something else, as `build` and `git-sync` do in the example.
+- Cancelling a task stops the whole process tree on Windows, but only the script's own process on macOS and Linux. In a shell script, start the long-running command with `exec` so the stop reaches it.
+- Scripts and agent sessions start with `RELAY_TOKEN` removed from their environment; that stops accidental leaks, not a script that reads `.env` itself.
+
+`worker/windows/` has example `.cmd` files: `build.cmd`, `git-sync.cmd`, and `launch.cmd`, which starts the app detached with `--remote-debugging-port=9222` so `cdp-status` can see what it is showing (Chromium, Electron and CEF apps; debug builds only). To keep a machine's scripts in their own folder or repo, point `WORKER_SCRIPTS` at that `scripts.json`.
 
 ## projects.json
 
 Agent tasks run in a folder chosen by name. The allowlist maps each name to a folder; the driver sends only the name, never a path. Like `scripts.json`, it is re-read for each task (`WORKER_PROJECTS` picks another file).
 
 ```json
-"my-app": { "path": "C:\\src\\my-app", "description": "The app's checkout" }
+"my-app": { "path": "C:\\src\\my-app", "description": "The app's checkout" },
+"docs": { "path": "/home/you/src/docs", "description": "Docs site" }
 ```
 
 - `operator_agent` with `project: "my-app"` runs in that folder. Without `project` it runs in `WORKER_CWD`, which must be a folder outside this checkout.
@@ -119,7 +209,7 @@ Only list folders you trust: each folder's own `.claude/settings.json` (allow ru
 - Edits to files that configure tools later (`.claude/`, `.git/`, `.vscode/`, `.husky/`, `.mcp.json`, `CLAUDE.md` and similar) always ask below `auto`. Network and other unusual path spellings always ask.
 - `WORKER_SETTINGS` picks which Claude settings files agent sessions load (`user,project,local` by default). Allow rules and hooks in a loaded file apply before this check, so they skip approval and the ceiling. Set it to `project`, or empty, to keep your personal rules away from operator agents.
 
-**This is not a sandbox.** A shell command you approve, or any command at `auto`, can reach every file your Windows user can. For real isolation, run the worker as a separate Windows user.
+**This is not a sandbox.** A shell command you approve, or any command at `auto`, can reach every file the worker's OS user can. For real isolation, run the worker as a separate user.
 
 Requests show up in the dashboard and in `operator_status`. Unanswered requests are denied after `WORKER_PERMISSION_TIMEOUT_MIN`.
 
@@ -141,27 +231,27 @@ The agent has a `wait_for_user` tool. When it needs you to do something on the d
 The repo is also a Claude Code plugin marketplace with `/operator:projects`, `/operator:scripts`, `/operator:workers`, `/operator:tasks`, `/operator:status <task>`, `/operator:agent <project> <prompt>` and `/operator:exec <script> [args]`. Each calls the matching MCP tool, so register the `operator` MCP server first.
 
 ```sh
-claude plugin marketplace add ~/claude-operator
+claude plugin marketplace add /full/path/to/claude-operator
 claude plugin install operator@claude-operator
 ```
 
-## Example CLAUDE.md for your Mac project
+## Example CLAUDE.md for your project
 
 ```md
-## Windows (operator)
-- The Windows machine is reachable through the operator MCP tools (worker "win").
+## Build machine (operator)
+- The build machine is reachable through the operator MCP tools (worker "win").
 - operator_projects lists the folders an agent can work in; operator_scripts lists the scripts.
 - Builds, launching the app and git sync: operator_exec with build, launch, kill-app, cdp-status, git-sync.
   Push commits first; the worker checks them out with git-sync <ref>.
 - After a failed build: operator_status with grep "error" to get the first errors, fix them here, push, rebuild.
-- Use operator_agent only for work that needs judgment on Windows (Windows-only errors, debugging the running app).
+- Use operator_agent only for work that needs judgment on that machine (platform-only errors, debugging the running app).
   Write self-contained instructions; the remote agent can't see this conversation.
 - When the app needs a manual step (login, dialog), tell me and wait.
 ```
 
 ## Security
 
-The hub can make the Windows machine run commands.
+The hub can make the worker machine run commands.
 
 - Bind `HUB_HOST` to a Tailscale or loopback address, never `0.0.0.0` on an open network.
 - Use a long random `RELAY_TOKEN`.
@@ -176,4 +266,5 @@ mcp-remote/index.ts   MCP server for Claude Code
 worker/               index.ts (connection, outbox, queue), exec.ts, agent.ts, config.ts
 worker/windows/       example .cmd scripts and the logon launcher
 plugin/               /operator:* slash commands
+scripts/service.ts    the <part>:start/stop/status/logs commands
 ```
