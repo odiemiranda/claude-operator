@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+node_modules/
+*.sqlite
+*.sqlite-*
+worker/scripts.json
+worker/projects.json
+.DS_Store
+hub.log
+.hub.pid
+worker.log
+.worker.pid
+mcp.log
+.mcp.pid

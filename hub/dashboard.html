@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Relay</title>
+<style>
+  :root {
+    color-scheme: light;
+    --paper: #f6f7f9; --panel: #ffffff; --ink: #1e2430; --muted: #6a7383; --rule: #dadfe6;
+    --run: #2f5fa8; --ok: #2e7d6b; --fail: #b23a2b; --wait: #b7791f; --wait-bg: #fbf1dc; --wait-ink: #5c3d06;
+    --sel: #e9eef6; --log: #f1f3f6;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --paper: #171b22; --panel: #1e232c; --ink: #e3e7ed; --muted: #8d96a5; --rule: #2e3542;
+      --run: #7aa2e3; --ok: #5fbfa6; --fail: #e67a68; --wait: #e5a83b; --wait-bg: #3a2d14; --wait-ink: #f6dfae;
+      --sel: #263042; --log: #151920;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--paper); color: var(--ink); font: 15px/1.45 var(--sans);
+    padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0);
+    display: flex; flex-direction: column;
+  }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button {
+    border: 1px solid var(--rule); background: var(--panel); border-radius: 6px; padding: 5px 12px; cursor: pointer;
+  }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  :focus-visible { outline: 2px solid var(--run); outline-offset: 2px; }
+
+  header { display: flex; align-items: baseline; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--rule); }
+  header h1 { font-size: 17px; margin: 0; font-weight: 650; }
+  #workers { color: var(--muted); font-size: 14px; flex: 1; }
+  #workers .on { color: var(--ok); }
+  #conn { font-size: 13px; color: var(--muted); }
+
+  /* The one loud element: things waiting on you. */
+  #needs { background: var(--wait-bg); color: var(--wait-ink); border-bottom: 2px solid var(--wait); }
+  #needs:empty { display: none; }
+  .need { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 20px; }
+  .need + .need { border-top: 1px solid color-mix(in srgb, var(--wait) 35%, transparent); }
+  .need .what { flex: 1 1 340px; min-width: 0; }
+  .need .what strong { font-weight: 650; }
+  .need code { font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
+  .need input { flex: 0 1 220px; border: 1px solid var(--wait); background: var(--panel); color: var(--ink); border-radius: 6px; padding: 5px 8px; }
+
+  main { flex: 1; display: grid; grid-template-columns: minmax(260px, 340px) 1fr; min-height: 0; }
+  #list { border-right: 1px solid var(--rule); overflow-y: auto; }
+  #tasks { list-style: none; margin: 0; padding: 0; }
+  #tasks li { padding: 10px 20px; border-bottom: 1px solid var(--rule); cursor: pointer; }
+  #tasks li[aria-selected="true"] { background: var(--sel); }
+  #tasks .line1 { display: flex; gap: 8px; align-items: baseline; }
+  #tasks .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #tasks .when { color: var(--muted); font-size: 13px; }
+  .status { font-size: 13px; font-weight: 600; }
+  .s-running, .s-assigned { color: var(--run); }
+  .s-done { color: var(--ok); }
+  .s-error { color: var(--fail); }
+  .s-waiting { color: var(--wait); }
+  .s-queued, .s-cancelled { color: var(--muted); }
+
+  details#new { border-bottom: 1px solid var(--rule); padding: 10px 20px; }
+  details#new summary { cursor: pointer; font-weight: 600; }
+  #clear { margin: 8px 20px; }
+  #newform { display: grid; gap: 8px; margin-top: 10px; }
+  #newform textarea, #newform input, #newform select {
+    width: 100%; border: 1px solid var(--rule); background: var(--panel); border-radius: 6px; padding: 6px 8px;
+  }
+  #newform .row { display: flex; gap: 8px; }
+
+  #detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  #dhead { padding: 14px 20px; border-bottom: 1px solid var(--rule); display: flex; gap: 12px; align-items: flex-start; }
+  #dhead .meta { flex: 1; min-width: 0; }
+  #dhead h2 { font-size: 16px; margin: 0 0 2px; font-weight: 600; overflow-wrap: anywhere; }
+  #dhead p { margin: 0; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+  #log {
+    flex: 1; overflow: auto; margin: 0; padding: 12px 20px; background: var(--log);
+    font: 12.5px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  #log .stderr { color: var(--fail); }
+  #log .info { color: var(--muted); }
+  #log .text { color: var(--ink); font-family: var(--sans); font-size: 14px; display: block; margin: 6px 0; }
+  #log .call { color: var(--run); }
+  #log .err { color: var(--fail); }
+  #log .pause { color: var(--wait); font-weight: 600; }
+  #log .result { display: block; margin-top: 8px; font-weight: 600; }
+  .empty { color: var(--muted); padding: 40px 20px; }
+
+  #login { margin: 15vh auto; max-width: 360px; padding: 0 20px; display: grid; gap: 10px; }
+  #login input { border: 1px solid var(--rule); background: var(--panel); border-radius: 6px; padding: 8px; }
+
+  @media (max-width: 760px) {
+    main { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    #list { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 38vh; }
+    header { padding: 10px 14px; flex-wrap: wrap; }
+    .need, #tasks li, #dhead, #log, details#new { padding-left: 14px; padding-right: 14px; }
+    #clear { margin: 8px 14px; }
+    .need .what, .need input { flex: 1 1 100%; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    #needs .need { animation: arrive .25s ease-out; }
+    @keyframes arrive { from { background: color-mix(in srgb, var(--wait) 30%, transparent); } }
+  }
+</style>
+</head>
+<body>
+<form id="login" hidden>
+  <label for="tok">Relay token</label>
+  <input id="tok" type="password" autocomplete="current-password" required>
+  <button class="primary">Connect</button>
+</form>
+
+<header hidden>
+  <h1>Relay</h1>
+  <div id="workers">No workers connected</div>
+  <div id="conn">connecting…</div>
+</header>
+<section id="needs" aria-live="polite" hidden></section>
+<main hidden>
+  <div id="list">
+    <details id="new">
+      <summary>New task</summary>
+      <form id="newform">
+        <div class="row">
+          <select id="nkind" aria-label="Kind"><option value="exec">Run script</option><option value="agent">Ask agent</option></select>
+          <input id="ntarget" aria-label="Worker" placeholder="worker (win)">
+        </div>
+        <input id="nscript" placeholder="script, e.g. build">
+        <input id="nargs" placeholder="args, space separated (optional)">
+        <textarea id="nprompt" rows="4" placeholder="Instructions for the remote agent" hidden></textarea>
+        <div class="row" id="nagentopts" hidden>
+          <input id="nproject" placeholder="project (from the worker's projects.json)" aria-label="Project">
+          <select id="nmodel" aria-label="Model"><option value="">worker default</option><option>claude-haiku-5-5</option><option>claude-sonnet-5-5</option></select>
+          <select id="nperm" aria-label="Permissions"><option value="">default perms</option><option value="ask">ask</option><option value="edits">edits</option><option value="auto">auto</option></select>
+        </div>
+        <button class="primary">Start task</button>
+      </form>
+    </details>
+    <button id="clear" type="button">Clear finished</button>
+    <ul id="tasks" role="listbox" aria-label="Tasks"></ul>
+  </div>
+  <section id="detail">
+    <div id="dhead"><div class="meta"><h2>No task selected</h2><p>Pick a task to see its output.</p></div></div>
+    <pre id="log"></pre>
+  </section>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let token = localStorage.getItem("relay-token") || new URLSearchParams(location.search).get("token");
+const tasks = new Map();     // id -> task
+const pending = new Map();   // task id -> pending[]
+let selected = null;
+let ws;
+
+function api(path, opts = {}) {
+  return fetch(path, { ...opts, headers: { authorization: "Bearer " + token, "content-type": "application/json" } })
+    .then(async (r) => { const b = await r.json().catch(() => ({})); if (!r.ok) throw new Error(b.error || r.status); return b; });
+}
+
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function ago(ts) {
+  const s = Math.round((Date.now() - ts) / 1000);
+  return s < 60 ? s + "s" : s < 3600 ? Math.round(s / 60) + "m" : s < 86400 ? Math.round(s / 3600) + "h" : Math.round(s / 86400) + "d";
+}
+const label = (t) => t.kind === "exec" ? `${t.script}${t.args?.length ? " " + t.args.join(" ") : ""}` : (t.prompt || "").split("\n")[0];
+
+// ---------- task list ----------
+function renderList() {
+  const ul = $("#tasks"); ul.replaceChildren();
+  const sorted = [...tasks.values()].sort((a, b) => b.created_at - a.created_at);
+  if (!sorted.length) { ul.append(el("li", "empty", "No tasks yet. Start one above or from Claude Code.")); return; }
+  for (const t of sorted) {
+    const li = el("li"); li.setAttribute("role", "option"); li.tabIndex = 0;
+    li.setAttribute("aria-selected", String(t.id === selected));
+    const l1 = el("div", "line1");
+    l1.append(el("span", "name", label(t)), el("span", "when", ago(t.updated_at)));
+    const l2 = el("div");
+    l2.append(el("span", "status s-" + t.status, t.status), document.createTextNode(`  ${t.kind}${t.project ? " · project " + t.project : ""} on ${t.target}`));
+    li.append(l1, l2);
+    li.onclick = li.onkeydown = (e) => { if (e.type === "click" || e.key === "Enter") select(t.id); };
+    ul.append(li);
+  }
+}
+
+// ---------- needs-you strip ----------
+async function refreshPending(id) {
+  const t = tasks.get(id);
+  if (!t || t.status !== "waiting") { pending.delete(id); renderNeeds(); return; }
+  try { const v = await api(`/api/tasks/${id}`); pending.set(id, v.pending); } catch {}
+  renderNeeds();
+}
+function renderNeeds() {
+  const box = $("#needs"); box.replaceChildren();
+  for (const [taskId, list] of pending) for (const p of list) {
+    const row = el("div", "need");
+    const what = el("div", "what");
+    const t = tasks.get(taskId);
+    if (p.kind === "permission") {
+      what.append(el("strong", null, `Allow ${p.tool}? `), el("code", null, p.input || ""));
+    } else {
+      what.append(el("strong", null, "Waiting for you: "), document.createTextNode(p.reason || ""));
+    }
+    what.append(el("div", null, `${t ? label(t) : taskId}`));
+    what.lastChild.style.fontSize = "13px";
+    const note = el("input"); note.placeholder = p.kind === "permission" ? "reason (optional)" : "note (optional)";
+    const send = (action) => api(`/api/tasks/${taskId}/control`, {
+      method: "POST", body: JSON.stringify({ action, request_id: p.request_id, message: note.value || undefined }),
+    }).catch((e) => alert("Could not send: " + e.message));
+    row.append(what, note);
+    if (p.kind === "permission") {
+      const a = el("button", "primary", "Allow"); a.onclick = () => send("approve");
+      const d = el("button", null, "Deny"); d.onclick = () => send("deny");
+      row.append(a, d);
+    } else {
+      const c = el("button", "primary", "Continue"); c.onclick = () => send("continue");
+      row.append(c);
+    }
+    const open = el("button", null, "Open"); open.onclick = () => select(taskId);
+    row.append(open);
+    box.append(row);
+  }
+  box.hidden = !box.childElementCount;
+}
+
+// ---------- detail ----------
+function renderHead() {
+  const t = tasks.get(selected); const head = $("#dhead"); head.replaceChildren();
+  if (!t) return;
+  const meta = el("div", "meta");
+  meta.append(el("h2", null, label(t)));
+  const p = el("p"); p.append(el("span", "status s-" + t.status, t.status),
+    document.createTextNode(`  ${t.kind}${t.model ? " · " + t.model : ""}${t.project ? " · project " + t.project : ""} on ${t.target}  ${t.id}`));
+  meta.append(p);
+  if (t.result) meta.append(el("p", null, t.result));
+  head.append(meta);
+  if (!["done", "error", "cancelled"].includes(t.status)) {
+    const b = el("button", null, "Cancel task");
+    b.onclick = () => confirm("Cancel this task?") && api(`/api/tasks/${t.id}/control`, { method: "POST", body: JSON.stringify({ action: "cancel" }) }).catch((e) => alert(e.message));
+    head.append(b);
+  }
+}
+function eventNodes(e) {
+  const p = e.payload || {};
+  switch (e.type) {
+    case "log": return p.lines.map((l) => el("span", p.stream === "stderr" ? "stderr" : null, l + "\n"));
+    case "info": return [el("span", "info", `· ${p.message}${p.auth ? `  (auth ${p.auth}, ${p.model})` : ""}\n`)];
+    case "text": return [el("span", "text", p.text)];
+    case "tool_call": return [el("span", "call", `→ ${p.name}: ${p.input}\n`)];
+    case "tool_result": return p.is_error ? [el("span", "err", `✗ ${p.content}\n`)] : [el("span", "info", `  ✓ ${String(p.content).split("\n")[0].slice(0, 200)}\n`)];
+    case "permission_request": return [el("span", "pause", `⏸ asks to run ${p.tool}: ${p.input}\n`)];
+    case "permission_resolved": return [el("span", "info", `▶ ${p.decision}${p.message ? ": " + p.message : ""}\n`)];
+    case "waiting": return [el("span", "pause", `⏸ waiting for you: ${p.reason}\n`)];
+    case "resumed": return [el("span", "info", `▶ continued${p.message ? ": " + p.message : ""}\n`)];
+    case "result": return [el("span", "result " + (p.ok ? "" : "err"), `■ ${p.ok ? "Done" : "Failed"}: ${p.summary}\n`)];
+    default: return [el("span", null, JSON.stringify(e) + "\n")];
+  }
+}
+function appendEvents(events) {
+  const log = $("#log");
+  const stick = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;
+  for (const e of events) log.append(...eventNodes(e));
+  if (stick) log.scrollTop = log.scrollHeight;
+}
+let lastSeq = 0;
+async function select(id) {
+  selected = id; lastSeq = 0;
+  history.replaceState(null, "", "#" + id);
+  renderList(); renderHead();
+  const log = $("#log"); log.replaceChildren();
+  const events = await api(`/api/tasks/${id}/events?tail=2000`).catch(() => []);
+  if (selected !== id) return;
+  appendEvents(events);
+  lastSeq = events.at(-1)?.seq ?? 0;
+  log.scrollTop = log.scrollHeight;
+}
+
+// ---------- live connection ----------
+function connect() {
+  ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?role=dashboard&token=${encodeURIComponent(token)}`);
+  ws.onopen = () => { $("#conn").textContent = "live"; };
+  ws.onclose = () => { $("#conn").textContent = "reconnecting…"; setTimeout(connect, 2000); };
+  ws.onmessage = (m) => {
+    const msg = JSON.parse(m.data);
+    if (msg.t === "snapshot") {
+      tasks.clear(); for (const t of msg.tasks) tasks.set(t.id, t);
+      renderWorkers(msg.workers); renderList();
+      for (const t of msg.tasks) if (t.status === "waiting") refreshPending(t.id);
+      const want = location.hash.slice(1);
+      if (selected && !tasks.has(selected)) {
+        selected = null; lastSeq = 0; $("#log").replaceChildren(); renderHead();
+      }
+      if (want && tasks.has(want)) select(want); else if (selected) select(selected);
+    } else if (msg.t === "task") {
+      tasks.set(msg.task.id, msg.task); renderList();
+      if (msg.task.id === selected) renderHead();
+      refreshPending(msg.task.id);
+    } else if (msg.t === "event") {
+      if (msg.event.task_id === selected && msg.event.seq > lastSeq) { appendEvents([msg.event]); lastSeq = msg.event.seq; }
+      if (["permission_request", "waiting", "permission_resolved", "resumed"].includes(msg.event.type)) refreshPending(msg.event.task_id);
+    } else if (msg.t === "workers") renderWorkers(msg.workers);
+  };
+}
+function renderWorkers(list) {
+  const w = $("#workers"); w.replaceChildren();
+  if (!list.length) { w.textContent = "No workers connected"; return; }
+  for (const x of list) {
+    const s = el("span", "on", "● "); w.append(s, document.createTextNode(`${x.name} (${x.active.length} active)  `));
+  }
+}
+
+// ---------- new task form ----------
+$("#nkind").onchange = () => {
+  const agent = $("#nkind").value === "agent";
+  $("#nscript").hidden = $("#nargs").hidden = agent;
+  $("#nprompt").hidden = $("#nagentopts").hidden = !agent;
+};
+$("#clear").onclick = async () => {
+  if (!confirm("Delete all finished tasks (done, error, cancelled) and their output? They can't be resumed afterwards.")) return;
+  try { await api("/api/tasks/clear", { method: "POST" }); } catch (e) { alert(e.message); }
+};
+
+$("#newform").onsubmit = async (e) => {
+  e.preventDefault();
+  const kind = $("#nkind").value;
+  const body = { kind, target: $("#ntarget").value || undefined };
+  if (kind === "exec") {
+    body.script = $("#nscript").value.trim();
+    const args = $("#nargs").value.trim(); if (args) body.args = args.split(/\s+/);
+  } else {
+    body.prompt = $("#nprompt").value.trim();
+    body.project = $("#nproject").value.trim() || undefined;
+    body.model = $("#nmodel").value || undefined; body.permission = $("#nperm").value || undefined;
+  }
+  try { const t = await api("/api/tasks", { method: "POST", body: JSON.stringify(body) }); tasks.set(t.id, t); select(t.id); $("#new").open = false; }
+  catch (err) { alert("Could not start task: " + err.message); }
+};
+
+// ---------- start ----------
+async function start() {
+  try { await api("/api/workers"); }
+  catch { localStorage.removeItem("relay-token"); $("#login").hidden = false; return; }
+  localStorage.setItem("relay-token", token);
+  history.replaceState(null, "", location.pathname + location.hash);
+  $("#login").hidden = true;
+  for (const s of ["header", "main"]) $(s).hidden = false;
+  connect();
+  setInterval(renderList, 30000);
+}
+$("#login").onsubmit = (e) => { e.preventDefault(); token = $("#tok").value; start(); };
+if (token) start(); else $("#login").hidden = false;
+</script>
+</body>
+</html>

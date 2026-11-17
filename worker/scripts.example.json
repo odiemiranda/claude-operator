@@ -1,0 +1,31 @@
+{
+  "build": {
+    "description": "Build the app; args are build targets",
+    "cmd": ["cmd", "/c", "C:\\claude-operator\\worker\\windows\\build.cmd"],
+    "allowArgs": true,
+    "argPattern": "[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}",
+    "timeoutMin": 360
+  },
+  "launch": {
+    "description": "Start the app detached with the debugging port open",
+    "cmd": ["cmd", "/c", "C:\\claude-operator\\worker\\windows\\launch.cmd"],
+    "timeoutMin": 1
+  },
+  "kill-app": {
+    "description": "Stop the running app",
+    "cmd": ["taskkill", "/IM", "my-app.exe", "/T", "/F"],
+    "timeoutMin": 1
+  },
+  "cdp-status": {
+    "description": "List open pages via the DevTools endpoint",
+    "cmd": ["curl", "-s", "http://127.0.0.1:9222/json"],
+    "timeoutMin": 1
+  },
+  "git-sync": {
+    "description": "Fetch and check out a ref",
+    "cmd": ["cmd", "/c", "C:\\claude-operator\\worker\\windows\\git-sync.cmd"],
+    "allowArgs": true,
+    "argPattern": "(?!.*\\.\\.)[A-Za-z0-9_][A-Za-z0-9_./-]{0,199}",
+    "timeoutMin": 10
+  }
+}

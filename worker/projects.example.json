@@ -1,0 +1,10 @@
+{
+  "my-app": {
+    "path": "C:\\src\\my-app",
+    "description": "The app's checkout"
+  },
+  "scratch": {
+    "path": "C:\\src\\scratch",
+    "description": "Any other folder you want agents to work in"
+  }
+}

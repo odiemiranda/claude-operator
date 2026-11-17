@@ -1,0 +1,32 @@
+{
+  "name": "claude-operator",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "hub": "bun run hub/index.ts",
+    "hub:start": "bun run scripts/service.ts hub start",
+    "hub:stop": "bun run scripts/service.ts hub stop",
+    "hub:status": "bun run scripts/service.ts hub status",
+    "hub:logs": "bun run scripts/service.ts hub logs",
+    "mcp": "bun run mcp-remote/index.ts",
+    "mcp:start": "bun run scripts/service.ts mcp start",
+    "mcp:stop": "bun run scripts/service.ts mcp stop",
+    "mcp:status": "bun run scripts/service.ts mcp status",
+    "mcp:logs": "bun run scripts/service.ts mcp logs",
+    "worker": "bun run worker/index.ts",
+    "worker:start": "bun run scripts/service.ts worker start",
+    "worker:stop": "bun run scripts/service.ts worker stop",
+    "worker:status": "bun run scripts/service.ts worker status",
+    "worker:logs": "bun run scripts/service.ts worker logs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.312",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.1",
+    "typescript": "5.9.3"
+  }
+}
