@@ -4,10 +4,19 @@ import type { TaskContext } from "./context";
 
 const IS_WIN = process.platform === "win32";
 
-// ponytail: non-Windows kills only the direct child; spawn detached + process.kill(-pid) to stop the whole group.
-function killTree(pid: number) {
-  if (IS_WIN) Bun.spawnSync(["taskkill", "/PID", String(pid), "/T", "/F"]);
-  else try { process.kill(pid, "SIGTERM"); } catch {}
+// Stop the script and everything it started. On Windows taskkill /T walks the tree. Elsewhere the script runs
+// detached (its own process group, pgid = pid), so signalling -pid reaches its children too; SIGKILL follows
+// after a grace period for anything that ignores SIGTERM (its open pipes would otherwise keep the task running).
+export function killTree(pid: number) {
+  if (IS_WIN) {
+    Bun.spawnSync(["taskkill", "/PID", String(pid), "/T", "/F"]);
+    return;
+  }
+  const signal = (sig: NodeJS.Signals) => {
+    try { process.kill(-pid, sig); } catch { try { process.kill(pid, sig); } catch {} } // no group: older Bun ignored detached
+  };
+  signal("SIGTERM");
+  setTimeout(() => signal("SIGKILL"), 5_000).unref();
 }
 
 export async function runExec(ctx: TaskContext): Promise<void> {
@@ -53,6 +62,8 @@ export async function runExec(ctx: TaskContext): Promise<void> {
     stderr: "pipe",
     stdin: "ignore",
     env: childEnv(),
+    // Own process group outside Windows, so killTree can stop the script's children. Missing from bun-types.
+    ...(IS_WIN ? {} : { detached: true }),
   });
 
   // Batch output into one event per ~300ms per stream so the log stays readable and SQLite stays calm.

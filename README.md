@@ -173,7 +173,7 @@ macOS / Linux:
 
 - `allowArgs` lets the driver append arguments; leave it off unless the script expects them.
 - Every argument must fully match the script's `argPattern` (a regex), or the task is refused. Without one, the default allows plain names only: letters, digits and `_ . / + -`, not starting with `-`, `/` or `.`, and without `..`. That keeps spaces, shell characters, options (`-f`), response files (`@x`) and paths out. Set a pattern per script when it needs something else, as `build` and `git-sync` do in the example.
-- Cancelling a task stops the whole process tree on Windows, but only the script's own process on macOS and Linux. In a shell script, start the long-running command with `exec` so the stop reaches it (see [Limitations](#limitations)).
+- Cancelling a task, or hitting `timeoutMin`, stops the script and everything it started: the process tree on Windows, the script's process group on macOS and Linux (`SIGTERM`, then `SIGKILL` after 5 s). See [Limitations](#limitations) for what escapes that.
 - Scripts and agent sessions start with `RELAY_TOKEN` removed from their environment; that stops accidental leaks, not a script that reads `.env` itself.
 
 `worker/windows/` has example `.cmd` files: `build.cmd`, `git-sync.cmd`, and `launch.cmd`, which starts the app detached with `--remote-debugging-port=9222` so `cdp-status` can see what it is showing (Chromium, Electron and CEF apps; debug builds only). To keep a machine's scripts in their own folder or repo, point `WORKER_SCRIPTS` at that `scripts.json`.
@@ -251,7 +251,7 @@ claude plugin install operator@claude-operator
 
 ## Limitations
 
-- **Cancel on macOS and Linux stops only the script's own process.** On Windows the worker kills the whole process tree (`taskkill /T`). On macOS and Linux it sends `SIGTERM` to the script's process only, so anything the script started (a compiler, a launched app) keeps running after a cancel or timeout. Workaround: in a shell script, start the long-running command with `exec` (`exec make -j8 "$@"`) so it replaces the shell and receives the signal, or trap `TERM` in the script and stop its children yourself.
+- **Cancel can miss processes that leave on purpose.** On macOS and Linux a script runs in its own process group, and cancel or timeout signals that group (`SIGTERM`, then `SIGKILL` after 5 s). A child that starts its own session (`setsid`, many daemons) is outside the group and keeps running; on Windows, `taskkill /T` misses processes whose parent already exited. Stop those with a separate script (e.g. `kill-app`).
 - **Not a sandbox.** Approved or `auto`-level shell commands can reach anything the worker's OS user can. Run the worker as a separate user for isolation.
 - **One shared token.** `RELAY_TOKEN` grants full access to the hub, dashboard and every worker; there are no per-user accounts.
 - **The hub binds one address.** `HUB_URL` on the MCP server and every worker must use that exact address (e.g. not the LAN IP when the hub binds the Tailscale IP).
